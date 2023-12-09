@@ -1,0 +1,71 @@
+#!/bin/bash
+# Author: Ben Ackerman
+# Purpose: This script restrores a backup
+# Last revision date: December 8, 2023
+# Variables:
+#   BACKUP_RESTORE_NAME - Directory for backup file that will be restored
+
+# Name of backup restore 
+BACKUP_RESTORE_NAME=$1
+
+# Information on backup config 
+CONFIG_FILE="/etc/backup.conf"
+
+# Get all lines from file that are not commented out
+eval $(awk '/^[^#]/' $CONFIG_FILE | grep '=' | awk 'BEGIN {FS="="} {print $1"="$2; }')
+
+# Colon separated entries for each directory to backup in the format
+BACKUP_DIR_ARRAY=($(awk '/^[^#]/' $CONFIG_FILE | grep -v '='))
+
+# Convert compressed file name into array - UBT.home.2023-12-04.18:44.tar.gz
+FILENAME_INFO_ARRAY=($(echo $BACKUP_RESTORE_NAME | tr "." " "))
+
+echo ${FILENAME_INFO_ARRAY[@]}
+
+# Restore script
+echo -e "\nRestoring backup located at $BACKUP_RESTORE_NAME\n"
+
+# Iterate through backup directory
+for DIRECTORY_INFO in "${BACKUP_DIR_ARRAY[@]}"
+  do
+    # Extract directory info into an array
+    DIRECTORY_INFO_ARRAY=($(echo $DIRECTORY_INFO | tr ":" " "))
+
+    echo "${FILENAME_INFO_ARRAY[1]}"
+
+    # Check if the backup names are equal
+    if [[ "${FILENAME_INFO_ARRAY[1]}" == "${DIRECTORY_INFO_ARRAY[0]}" ]]; then
+
+      # Ask the user for confirmation
+      read -p "Do you want to extract these files and overwrite any existing files? (y/n): " answer
+
+      # Check the user's response
+      if [ "$answer" = "y" ]; then
+          # Create a tar archive of the backup target
+	      $COMPRESSION -dv $BACKUP_RESTORE_NAME
+	      # Extract files from a tar archive and delete orginal tar file
+		  tar --force-local -xvf "${BACKUP_RESTORE_NAME%.*}" && rm "${BACKUP_RESTORE_NAME%.*}"
+
+		  echo "${DIRECTORY_INFO_ARRAY[1]}"
+		  # Remove the destination directory
+		  rm -rf "${DIRECTORY_INFO_ARRAY[1]}"
+		  # Create the directory
+		  mkdir -p "${DIRECTORY_INFO_ARRAY[1]}"
+		  # Move files that are extracted
+		  mv -f "${FILENAME_INFO_ARRAY[1]}"/* "${DIRECTORY_INFO_ARRAY[1]}"
+		  # Remove files that are left over
+		  rm -rf "${FILENAME_INFO_ARRAY[1]}"
+		  # Prompt
+		  echo "Extraction completed."
+	
+      else
+		  # Program prompt
+          echo "Extraction not completed."
+      fi
+
+      # break for loop
+	  break
+
+    fi
+      
+done
