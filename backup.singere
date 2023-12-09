@@ -1,0 +1,85 @@
+#!/bin/bash
+# Author: Ben Ackerman
+# Purpose: This script backs up directories and manages the backup files based on the content of a configuration file.
+# Last revision date: December 8, 2023
+# Variables:
+# BACKUP_NAME - Directory to be backed up
+# FREQUENCY - Type of backup (daily, weekly, monthly)
+
+# Backup file name
+BACKUP_NAME=$1
+FREQUENCY=$2
+
+# Backup configuration information
+CONFIG_FILE="/etc/backup.conf"
+
+# Get all lines from configure file that are not commented out
+eval $(awk '/^[^#]/' $CONFIG_FILE | grep '=' | awk 'BEGIN {FS="="} {print $1"="$2; }')
+
+# Array of entries for each directory to backup in the format
+BACKUP_DIR_ARRAY=($(awk '/^[^#]/' $CONFIG_FILE | grep -v '='))
+
+# Check and creates a log directory if the file does not exist
+LOG_DIR="/var/log/backup"
+mkdir -p $LOG_DIR
+
+# Create sub-directory based on frequency
+case $FREQUENCY in
+  daily)
+    BACKUP_DIR="$BACKUP_TARGET/daily"
+    ;;
+  weekly)
+    BACKUP_DIR="$BACKUP_TARGET/weekly"
+    ;;
+  monthly)
+    BACKUP_DIR="$BACKUP_TARGET/monthly"
+    ;;
+  *)
+    # Default to adhoc if frequency not specified
+    BACKUP_DIR="$BACKUP_TARGET/adhoc"
+    ;;
+esac
+
+# Create backup sub-directory if not exists
+mkdir -p $BACKUP_DIR
+
+# Backup file name format
+BACKUP_FILE="$HOSTNAME.$BACKUP_NAME.$(date +'%Y-%m-%d.%H:%M')".tar
+
+# Iterates through backup directory information
+for DIRECTORY_INFO in "${BACKUP_DIR_ARRAY[@]}"; do
+  # Creates an array for directory info
+  DIRECTORY_INFO_ARRAY=($(echo $DIRECTORY_INFO | tr ":" " "))
+
+  # Checks equality of backup configs
+  if [[ "$BACKUP_NAME" == "${DIRECTORY_INFO_ARRAY[0]}" ]]; then
+    # Creates the tar archive of the backup target
+    tar --force-local -cvf "$BACKUP_FILE" "${DIRECTORY_INFO_ARRAY[1]}"
+    # Compress the tar file using the specified compression utility
+    $COMPRESSION -v "$BACKUP_FILE"
+    # Move backup file to backup target
+    mv "$BACKUP_FILE"* "$BACKUP_DIR"
+
+    # Logs the file name
+    LOG_FILE="$LOG_DIR/$BACKUP_NAME.$(date +'%Y-%m-%d.%H:%M')"
+    # Logs backup details
+    echo "Backup started at: $(date +'%Y-%m-%d.%H:%M')" > "$LOG_FILE"
+    echo "Files backed up:" >> "$LOG_FILE"
+    ls -l "${DIRECTORY_INFO_ARRAY[1]}" >> "$LOG_FILE"
+    echo -e "\n"
+    ls -R "${DIRECTORY_INFO_ARRAY[1]}" >> "$LOG_FILE"
+
+    # Check and delete old backups if exceeding maximum
+    MAX_BACKUPS=$(eval echo \$MAX_BACKUPS_$FREQUENCY)
+    CURRENT_BACKUPS=$(ls -1 "$BACKUP_DIR" | wc -l)
+
+    if [[ $CURRENT_BACKUPS -gt $MAX_BACKUPS ]]; then
+      # Delete the oldest backups until only the maximum number of copies remain
+      OLDEST_BACKUPS=$(ls -t "$BACKUP_DIR" | tail -n $((CURRENT_BACKUPS - MAX_BACKUPS)))
+      rm -f "$BACKUP_DIR/$OLDEST_BACKUPS"
+    fi
+
+    # Break for loop
+    break
+  fi
+done
